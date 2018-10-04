@@ -1,50 +1,66 @@
 import argparse
 import asyncio
-import itertools
+from collections import defaultdict
 import logging
-import random
-
 import aiosip
+import aioredis
+import json
 
-from util import Registration
+locations = defaultdict(set)
+srv_host = 'xxxxxx'
+srv_port = '7000'
+realm = 'XXXXXX'
+user = 'YYYYYY'
+pwd = 'ZZZZZZ'
+local_host = '0.0.0.0'
+local_port = 6000
 
-sip_config = {
-    'srv_host': '127.0.0.1',
-    'srv_port': 6000,
-    'realm': 'XXXXXX',
-    'user': None,
-    'pwd': 'hunter2',
-    'local_host': '127.0.0.1',
-    'local_port': random.randint(6001, 6100)
-}
+redis_host = "localhost"
+redis_port = 6379
+redis_password = ""
 
+redis = None
 
-async def notify(dialog):
-    for idx in itertools.count(1):
-        await dialog.notify(payload=str(idx))
-        await asyncio.sleep(1)
+async def save(user, host, port):
+   redis = await aioredis.create_redis('redis://redis')
+   key = 'user:address:'+user
+   value = json.dumps({'host': host, 'port': port})
+   await redis.set(key,  value)
+   address = await redis.get(key)
+   print('address from Redis (key, address)', key, address)
+   redis.close()
+   await redis.wait_closed()
 
-
-async def on_subscribe(request, message):
+async def on_register(request, message):
     expires = int(message.headers['Expires'])
-    dialog = await request.prepare(status_code=200,
-                                   headers={'Expires': expires})
+    # TODO: challenge registrations
+    dialog = await request.prepare(status_code=200)
 
     if not expires:
         return
 
-    print('Subscription started!')
-    task = asyncio.ensure_future(notify(dialog))
+    # TODO: multiple contact fields
+    contact_uri = message.contact_details['uri']
+    user = contact_uri['user']
+    host = contact_uri['host']
+    port = contact_uri['port']
+    addr = host, port
+
+    locations[user].add(addr)
+    await save(user, host, port)
+    print('Registration established for {} at {}'.format(user, addr))
+   
+    
     async for message in dialog:
         expires = int(message.headers['Expires'])
 
-        await dialog.reply(message, 200, headers={'Expires': expires})
+        # TODO: challenge registrations
+        await dialog.reply(message, 200)
         if not expires:
             break
 
-    task.cancel()
-    print('Subscription ended!')
-
+    locations[user].remove(addr)
+    print('Unregistering {} at {}'.format(user, addr))
 
 class Dialplan(aiosip.BaseDialplan):
 
@@ -52,73 +68,44 @@ class Dialplan(aiosip.BaseDialplan):
         await super().resolve(*args, **kwargs)
 
         if kwargs['method'] == 'SUBSCRIBE':
-            return on_subscribe()
+            return on_subscribe
+        elif kwargs['method'] == 'REGISTER':
+            return on_register
 
 
-async def start(app, protocol):
-    await app.run(
-        protocol=protocol,
-        local_addr=(sip_config['local_host'], sip_config['local_port']))
+def start(app, protocol):
+    app.loop.run_until_complete( app.run( protocol=protocol, local_addr=(local_host, local_port)))
+    #redis = aioredis.create_redis_pool('redis://redis', minsize=5, maxsize=100, loop=app.loop) 
+    print('Serving on {} {}'.format( (local_host, local_port), protocol))
 
-    print('Serving on {} {}'.format(
-        (sip_config['local_host'], sip_config['local_port']), protocol))
+    try:
+        app.loop.run_forever()
+    except KeyboardInterrupt:
+        pass
 
-    if protocol is aiosip.WS:
-        peer = await app.connect(
-            'ws://{}:{}'.format(sip_config['srv_host'], sip_config['srv_port']),
-            protocol=protocol,
-            local_addr=(sip_config['local_host'], sip_config['local_port']))
-    else:
-        peer = await app.connect(
-            (sip_config['srv_host'], sip_config['srv_port']),
-            protocol=protocol,
-            local_addr=(sip_config['local_host'], sip_config['local_port']))
-
-    return Registration(
-        peer=peer,
-        from_details=aiosip.Contact.from_header('sip:{}@{}:{}'.format(
-            sip_config['user'], sip_config['local_host'],
-            sip_config['local_port'])),
-        to_details=aiosip.Contact.from_header('sip:{}@{}:{}'.format(
-            sip_config['user'], sip_config['srv_host'],
-            sip_config['srv_port'])),
-        contact_details=aiosip.Contact.from_header('sip:{}@{}:{}'.format(
-            sip_config['user'], sip_config['local_host'],
-            sip_config['local_port'])),
-        password=sip_config['pwd']
-    )
+    print('Closing')
+    ##redis.close()
+    #app.loop.run_until_complete(redis.wait_close())
+    app.loop.run_until_complete(app.close())
 
 
 def main():
     parser = argparse.ArgumentParser()
-    parser.add_argument('-p', '--protocol', default='udp')
-    parser.add_argument('user')
+    parser.add_argument('-p', '--protocol', default='tcp')
     args = parser.parse_args()
-
-    sip_config['user'] = args.user
 
     loop = asyncio.get_event_loop()
     app = aiosip.Application(loop=loop, dialplan=Dialplan())
 
     if args.protocol == 'udp':
-        server = start(app, aiosip.UDP)
+        start(app, aiosip.UDP)
     elif args.protocol == 'tcp':
-        server = start(app, aiosip.TCP)
+        start(app, aiosip.TCP)
     elif args.protocol == 'ws':
-        server = start(app, aiosip.WS)
+        start(app, aiosip.WS)
     else:
         raise RuntimeError("Unsupported protocol: {}".format(args.protocol))
 
-    # TODO: refactor
-    registration = loop.run_until_complete(server)
-    loop.run_until_complete(registration.__aenter__())
-    try:
-        loop.run_forever()
-    except KeyboardInterrupt:
-        loop.run_until_complete(registration.__aexit__(None, None, None))
-
-    print('Closing')
-    loop.run_until_complete(app.close())
     loop.close()
 
 

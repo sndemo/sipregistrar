@@ -15,4 +15,4 @@ RUN pip install aiosip-0.2.0-py2.py3-none-any.whl
 COPY app/ /app
 
 EXPOSE 6000
-CMD [ "python", "registrar.py", "-ptcp" ]
+CMD [ "python", "server.py", "-ptcp" ]
