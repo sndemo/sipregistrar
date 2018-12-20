@@ -15,14 +15,14 @@ pwd = 'ZZZZZZ'
 local_host = '0.0.0.0'
 local_port = 6000
 
-redis_host = "localhost"
+redis_host = "redis" if len(sys.argv) != 4 else sys.argv[2]
 redis_port = 6379
-redis_password = ""
+redis_password = None if len(sys.argv) != 4 else sys.argv[3]
 
 redis = None
 
 async def save(user, host, port):
-   redis = await aioredis.create_redis('redis://redis')
+   redis = await aioredis.create_redis('redis://' + redis_host, password = redis_password )
    key = 'user:address:'+user
    value = json.dumps({'host': host, 'port': port})
    await redis.set(key,  value)
