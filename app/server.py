@@ -5,6 +5,7 @@ import logging
 import aiosip
 import aioredis
 import json
+import os
 
 locations = defaultdict(set)
 srv_host = 'xxxxxx'
@@ -14,16 +15,10 @@ user = 'YYYYYY'
 pwd = 'ZZZZZZ'
 local_host = '0.0.0.0'
 local_port = 6000
-redis_host = getenv('REDIS_HOST');
-if (!isset(redis_host) || redis_host === null) {
-    redis_hosto = 'redis';
-}
 
+redis_host = os.getenv('REDIS_HOST', 'redis')
 redis_port = 6379
-redis_password = getenv("REDIS_PASSWORD");
-if (!isset(redis_password) || redis_password === null) {
-    redis_hosto = None;
-}
+redis_password = os.getenv("REDIS_PASSWORD", None)
 
 redis = None
 
