@@ -14,10 +14,16 @@ user = 'YYYYYY'
 pwd = 'ZZZZZZ'
 local_host = '0.0.0.0'
 local_port = 6000
+redis_host = getenv('REDIS_HOST');
+if (!isset(redis_host) || redis_host === null) {
+    redis_hosto = 'redis';
+}
 
-redis_host = "redis" if len(sys.argv) != 4 else sys.argv[2]
 redis_port = 6379
-redis_password = None if len(sys.argv) != 4 else sys.argv[3]
+redis_password = getenv("REDIS_PASSWORD");
+if (!isset(redis_password) || redis_password === null) {
+    redis_hosto = None;
+}
 
 redis = None
 
